@@ -270,6 +270,7 @@ internal class DuoIconHost(private val context: Context) {
                 if (parent === host || parent === hideStrip || extra != null) {
                     val container = parent
                     val owner = extra?.stock ?: hider
+                    if (owner === hider && stockHeldForShade) return
                     // Never hide the last stock icon over an element that is not drawing in this very
                     // container: the ROM can add an icon before Rive binds or while the slot is being
                     // rebuilt, and hiding then leaves a blank status bar.
@@ -365,6 +366,44 @@ internal class DuoIconHost(private val context: Context) {
      */
     private var panelStateKnown = false
     private var panelOwner: String? = null
+
+    /**
+     * ColorOS 16/17 mirror the main bar into the pulled-down shade: `qs_fake_statusicon_container`
+     * holds a `SystemIconFakeFrame` that draws the *main* `system_icons` strip, not the header's own
+     * icons. With the battery/Wi-Fi/cellular hidden there, the shade showed only Bluetooth and the
+     * network speed (measured on OnePlus PJZ110, ColorOS 17.0.0.103, SystemUI 17.99.02).
+     *
+     * So while a panel is open and Duo is not drawing in it, the main bar's stock icons are put back;
+     * the status bar is under the shade at that moment, so nothing doubles up. They are hidden again
+     * on collapse. Only ROMs that have the mirror resource take this path.
+     */
+    private val shadeMirrorsMainBar: Boolean by lazy {
+        val id = RomResources.id(context, rom, "qs_fake_statusicon_container")
+        L.i("shade mirror of main bar (qs_fake_statusicon_container): ${id != 0}")
+        id != 0
+    }
+
+    /** True while the main bar's stock icons are restored for the shade mirror; hide passes skip it. */
+    private var stockHeldForShade = false
+
+    private fun updateShadeMirrorHold(owner: String?) {
+        if (!shadeMirrorsMainBar) return
+        val hold = owner != null && !surfaceEnabled(owner)
+        if (hold == stockHeldForShade) return
+        stockHeldForShade = hold
+        try {
+            if (hold) {
+                hider.restore()
+                restoreAnchorVisibility()
+                L.i("shade mirror: stock icons restored while $owner is open")
+            } else {
+                reapplyHiding()
+                L.i("shade mirror: stock icons hidden again after collapse")
+            }
+        } catch (t: Throwable) {
+            L.w("shade mirror hold: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
 
     /**
      * The running collapse slide of the main copy: its resting translation and the animator that is
@@ -793,6 +832,7 @@ internal class DuoIconHost(private val context: Context) {
             }
             L.i("panel owner -> ${owner ?: "collapsed"}")
         }
+        updateShadeMirrorHold(owner)
     }
 
     /**
@@ -1942,6 +1982,7 @@ internal class DuoIconHost(private val context: Context) {
      * One place so the main bar, the keyguard bar and the shade header can never disagree.
      */
     private fun hideStock(container: ViewGroup, keep: View?, keepLayout: View? = null, owner: StockIconHider = hider) {
+        if (owner === hider && stockHeldForShade) return
         val ours = ourViews()
         if (settings.hideOtherIcons) {
             owner.hideAllExcept(container, keep, keepLayout, ours)
@@ -3423,7 +3464,7 @@ internal class DuoIconHost(private val context: Context) {
      * this is a harmless re-assertion.
      */
     private fun hideOverlayAnchor() {
-        if (!overlay) return
+        if (!overlay || stockHeldForShade) return
         val anchor = anchorBattery ?: return
         try {
             rememberAnchorVisibility()
