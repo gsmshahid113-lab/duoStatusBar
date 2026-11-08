@@ -270,7 +270,6 @@ internal class DuoIconHost(private val context: Context) {
                 if (parent === host || parent === hideStrip || extra != null) {
                     val container = parent
                     val owner = extra?.stock ?: hider
-                    if (owner === hider && stockHeldForShade) return
                     // Never hide the last stock icon over an element that is not drawing in this very
                     // container: the ROM can add an icon before Rive binds or while the slot is being
                     // rebuilt, and hiding then leaves a blank status bar.
@@ -368,44 +367,18 @@ internal class DuoIconHost(private val context: Context) {
     private var panelOwner: String? = null
 
     /**
-     * ColorOS 16/17 mirror the main bar into the pulled-down shade: `qs_fake_statusicon_container`
-     * holds a `SystemIconFakeFrame` that draws the *main* `system_icons` strip, not the header's own
-     * icons. With the battery/Wi-Fi/cellular hidden there, the shade showed only Bluetooth and the
-     * network speed (measured on OnePlus PJZ110, ColorOS 17.0.0.103, SystemUI 17.99.02).
-     *
-     * So while a panel is open, the main bar's stock icons are put back;
-     * the status bar is under the shade at that moment, so nothing doubles up. They are hidden again
-     * on collapse. Only ROMs that have the mirror resource take this path.
+     * ColorOS 17 (China build) shade/QS header: Duo's header copy is injected into `qs_frame` and hides
+     * the header's battery and cellular icons, but the ring never draws there, so the shade showed
+     * neither (OnePlus PJZ110, ColorOS 17.0.0.103, SystemUI 17.99.02). With both surfaces off the stock
+     * header showed correctly, so on this build the shade/QS copy is forced off and the stock header is
+     * left alone whatever the setting says. OxygenOS builds (EX/IN/EU/NA regions) are not affected:
+     * their shade path is measured and draws.
      */
-    private val shadeMirrorsMainBar: Boolean by lazy {
-        val id = RomResources.id(context, rom, "qs_fake_statusicon_container")
-        L.i("shade mirror of main bar (qs_fake_statusicon_container): ${id != 0}")
-        id != 0
-    }
-
-    /** True while the main bar's stock icons are restored for the shade mirror; hide passes skip it. */
-    private var stockHeldForShade = false
-
-    private fun updateShadeMirrorHold(owner: String?) {
-        if (!shadeMirrorsMainBar) return
-        // Regardless of "show in shade/QS": on these ROMs the mirror is drawn over the real header,
-        // so Duo's shade copy is never what the user sees (measured: showInShade=true, header copy
-        // attached to quick_qs_status_icons, shade still showed only Bluetooth and the speed).
-        val hold = owner != null
-        if (hold == stockHeldForShade) return
-        stockHeldForShade = hold
-        try {
-            if (hold) {
-                hider.restore()
-                restoreAnchorVisibility()
-                L.i("shade mirror: stock icons restored while $owner is open")
-            } else {
-                reapplyHiding()
-                L.i("shade mirror: stock icons hidden again after collapse")
-            }
-        } catch (t: Throwable) {
-            L.w("shade mirror hold: ${t.javaClass.simpleName}: ${t.message}")
-        }
+    private val shadeCopyUnsupported: Boolean by lazy {
+        val display = Build.DISPLAY.orEmpty()
+        val unsupported = Build.VERSION.SDK_INT >= 37 && display.contains("(CN")
+        L.i("shade/QS copy ${if (unsupported) "disabled" else "allowed"} on this build (display=$display)")
+        unsupported
     }
 
     /**
@@ -835,7 +808,6 @@ internal class DuoIconHost(private val context: Context) {
             }
             L.i("panel owner -> ${owner ?: "collapsed"}")
         }
-        updateShadeMirrorHold(owner)
     }
 
     /**
@@ -1112,7 +1084,7 @@ internal class DuoIconHost(private val context: Context) {
     private fun panelCoverExpected(): Boolean {
         val owner = activeSurfaceOwner()
         if (owner != null) return surfaceEnabled(owner)
-        return settings.showInQs || settings.showInShade
+        return surfaceEnabled("qs header") || surfaceEnabled("shade header")
     }
 
     /**
@@ -1287,8 +1259,8 @@ internal class DuoIconHost(private val context: Context) {
 
     /** Whether the user allows Duo in one of the optional header surfaces. */
     private fun surfaceEnabled(name: String): Boolean = when (name) {
-        "qs header" -> settings.showInQs
-        "shade header" -> settings.showInShade
+        "qs header" -> settings.showInQs && !shadeCopyUnsupported
+        "shade header" -> settings.showInShade && !shadeCopyUnsupported
         else -> true
     }
 
@@ -1310,8 +1282,8 @@ internal class DuoIconHost(private val context: Context) {
     /** Reveals exactly the current owner (QS or shade); the other copy is always hidden. */
     fun showSurfaceOwner() {
         val owner = displaySurfaceOwner()
-        val qs = owner == "qs header" && settings.showInQs
-        val shade = owner == "shade header" && settings.showInShade
+        val qs = owner == "qs header" && surfaceEnabled("qs header")
+        val shade = owner == "shade header" && surfaceEnabled("shade header")
         // QS/shade -> HUD: the main copy is already opaque (setMainBarVisible(true, immediateReveal)),
         // but if it has no drawable view yet the outgoing copy is held for one frame instead of being
         // faded out over an empty seat.
@@ -1985,7 +1957,6 @@ internal class DuoIconHost(private val context: Context) {
      * One place so the main bar, the keyguard bar and the shade header can never disagree.
      */
     private fun hideStock(container: ViewGroup, keep: View?, keepLayout: View? = null, owner: StockIconHider = hider) {
-        if (owner === hider && stockHeldForShade) return
         val ours = ourViews()
         if (settings.hideOtherIcons) {
             owner.hideAllExcept(container, keep, keepLayout, ours)
@@ -3467,7 +3438,7 @@ internal class DuoIconHost(private val context: Context) {
      * this is a harmless re-assertion.
      */
     private fun hideOverlayAnchor() {
-        if (!overlay || stockHeldForShade) return
+        if (!overlay) return
         val anchor = anchorBattery ?: return
         try {
             rememberAnchorVisibility()

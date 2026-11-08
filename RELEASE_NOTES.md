@@ -1,12 +1,13 @@
-# Duo Status Bar 2.0.3
+# Duo Status Bar 2.0.4
 
 ## Fixes
 
-- **ColorOS 16/17 shade icons**: ColorOS mirrors the main status bar into the pulled-down shade
-  (`qs_fake_statusicon_container` / `SystemIconFakeFrame`), so the battery, Wi-Fi and signal Duo hides
-  in the main bar also vanished from the shade. While the shade or QS is open (whatever the
-  show-in-shade setting), the stock icons are now put back, and hidden again on collapse. Only ROMs that have the
-  mirror resource take this path. Reported on OnePlus 13 (PJZ110), ColorOS 17.0.0.103.
+- **ColorOS 17 (China) shade icons**: on these builds Duo's shade/QS copy hid the header's battery and
+  signal but never drew the ring, so the pulled-down shade showed neither. The shade/QS copy is now
+  turned off on ColorOS 17 CN builds and the stock header is left as is, whatever the "Show Duo in
+  Quick Settings / notification panel" switches say. The 2.0.2/2.0.3 main-bar "mirror" workaround is
+  removed: the device log showed the shade draws its own header, not a mirror. Reported on OnePlus 13
+  (PJZ110), ColorOS 17.0.0.103.
 
 # Duo Status Bar 2.0.1
 
