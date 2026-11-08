@@ -373,7 +373,7 @@ internal class DuoIconHost(private val context: Context) {
      * icons. With the battery/Wi-Fi/cellular hidden there, the shade showed only Bluetooth and the
      * network speed (measured on OnePlus PJZ110, ColorOS 17.0.0.103, SystemUI 17.99.02).
      *
-     * So while a panel is open and Duo is not drawing in it, the main bar's stock icons are put back;
+     * So while a panel is open, the main bar's stock icons are put back;
      * the status bar is under the shade at that moment, so nothing doubles up. They are hidden again
      * on collapse. Only ROMs that have the mirror resource take this path.
      */
@@ -388,7 +388,10 @@ internal class DuoIconHost(private val context: Context) {
 
     private fun updateShadeMirrorHold(owner: String?) {
         if (!shadeMirrorsMainBar) return
-        val hold = owner != null && !surfaceEnabled(owner)
+        // Regardless of "show in shade/QS": on these ROMs the mirror is drawn over the real header,
+        // so Duo's shade copy is never what the user sees (measured: showInShade=true, header copy
+        // attached to quick_qs_status_icons, shade still showed only Bluetooth and the speed).
+        val hold = owner != null
         if (hold == stockHeldForShade) return
         stockHeldForShade = hold
         try {
